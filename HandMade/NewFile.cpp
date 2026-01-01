@@ -1,34 +1,38 @@
 #include <windows.h>
 #include <stdint.h>
 
-
 #define internal static
 #define global_var static
 
+struct Bitmap_buffer
+{
+	void* memory;
+	BITMAPINFO info;
+	int width;
+	int height;
+	int pitch;
+	// bitmapMemory stores the info reg the color of each pixel
+	// So the size of bitmapMemory = #(pixels) * 4 (- 4 = 3 rgb colors 3 bytes + 1 byte for padding)
+	int bytesPerPixel;
+};
+
+struct Win32_Dimension
+{
+	int width;
+	int height;
+};
 
 global_var bool running;
+global_var Bitmap_buffer globalBuffer;
 
-global_var void* bitmapMemory;
-global_var BITMAPINFO bitmapinfo;
-
-global_var int bitmapWidth;
-global_var int bitmapHeight;
-// bitmapMemory stores the info reg the color of each pixel
-// So the size of bitmapMemory = #(pixels) * 4 (- 4 = 3 rgb colors 3 bytes + 1 byte for padding)
-global_var int bytesPerPixel = 4;
-
-
-internal void renderBitmap(int xOffSet, int yOffSet)
+internal void RenderWeirdGradient(Bitmap_buffer buffer, int xOffSet, int yOffSet)
 {
-	int width = bitmapWidth;
-	int height = bitmapHeight;
+	uint8_t *row = (uint8_t *)(buffer.memory);
 	
-	uint8_t *row = (uint8_t *)bitmapMemory;
-	int pitch = width * bytesPerPixel;
-	for(int y=0; y<height; y++)
+	for(int y=0; y<buffer.height; y++)
 	{
 		uint32_t *pixel = (uint32_t *)row;
-		for(int x=0; x<width; x++)
+		for(int x=0; x<buffer.width; x++)
 		{
 			uint8_t blue = (x+xOffSet);
 			uint8_t green = (y+yOffSet);
@@ -36,8 +40,20 @@ internal void renderBitmap(int xOffSet, int yOffSet)
 			// Register xx RR GG BB - due to little endian
 			*pixel++ = ((green << 8) | blue);
 		}
-		row+=pitch;
+		row+=buffer.pitch;
 	}
+}
+
+Win32_Dimension getWindowDimension(HWND windowHandle)
+{
+	Win32_Dimension dimension;
+	RECT clientRect;
+	// This gives the actual part where you can draw into - 
+	// Where as GetWindowRect gives total rect including scrollbar,buttons,...
+	GetClientRect(windowHandle, &clientRect);
+	dimension.width = clientRect.right - clientRect.left;
+	dimension.height = clientRect.bottom - clientRect.top;
+	return dimension;
 }
 
 //DIB - Device independent Bitmap
@@ -48,116 +64,101 @@ You can create a new buffer then free the old one if this fails we can
 fall back to first one
 **/
 internal void
-ResizeDIBSection(int width, int height)
+ResizeDIBSection(Bitmap_buffer  *buffer, int width, int height)
 {
-	if(bitmapMemory)
+	if(buffer->memory)
 	{
-		VirtualFree(bitmapMemory, 0, MEM_RELEASE);
+		VirtualFree(buffer->memory, 0, MEM_RELEASE);
 	}
 	
-	bitmapWidth = width;
-	bitmapHeight = height;
+	buffer->width = width;
+	buffer->height = height;
+	buffer->bytesPerPixel = 4;
+
+	buffer->info.bmiHeader.biSize = sizeof(buffer->info.bmiHeader);
+	buffer->info.bmiHeader.biWidth = buffer->width;
+	buffer->info.bmiHeader.biHeight = -buffer->height;
+	buffer->info.bmiHeader.biPlanes = 1;
+	buffer->info.bmiHeader.biBitCount = 32;
+	buffer->info.bmiHeader.biCompression = BI_RGB;
 	
-	bitmapinfo.bmiHeader.biSize = sizeof(bitmapinfo.bmiHeader);
-	bitmapinfo.bmiHeader.biWidth = bitmapWidth;
-	bitmapinfo.bmiHeader.biHeight = -bitmapHeight;
-	bitmapinfo.bmiHeader.biPlanes = 1;
-	bitmapinfo.bmiHeader.biBitCount = 32;
-	bitmapinfo.bmiHeader.biCompression = BI_RGB;
+	int bitmapMemorySize = (buffer->width * buffer->height) * buffer->bytesPerPixel;
 	
-	int bitmapMemorySize = (bitmapWidth * bitmapHeight) * bytesPerPixel;
+	buffer->memory = VirtualAlloc(0, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
 	
-	bitmapMemory = VirtualAlloc(0, bitmapMemorySize, MEM_COMMIT, PAGE_READWRITE);
-	
-	renderBitmap(120, 0);
+	buffer->pitch = buffer->width * buffer->bytesPerPixel;
+
+	//RenderWeirdGradient(globalBuffer, 120, 0);
 }
 
 internal void 
-updateWindow(HDC deviceContext, RECT *rect, int x, int y, int width, int height)
+updateWindow(HDC deviceContext, Win32_Dimension dimension, Bitmap_buffer buffer,
+			int x, int y, int width, int height)//  The last 4 params are not used
 {
-	
-	int windowWidth = rect->right - rect->left;
-	int windowHeight = rect->bottom - rect->top;
 	
 	StretchDIBits(
 		deviceContext,
 		// x, y, width, height,
 		// x, y, width, height,
-		0, 0, bitmapWidth, bitmapHeight,
-		0, 0, windowWidth, windowHeight,
-		bitmapMemory,
-		&bitmapinfo,
+		0, 0, dimension.width, dimension.height,
+		0, 0, buffer.width, buffer.height,
+		buffer.memory,
+		&buffer.info,
 		DIB_RGB_COLORS, SRCCOPY);
 }
 
-LRESULT MainCallBack(
+LRESULT CALLBACK MainCallBack(
   HWND windowHandle,
   UINT message,
   WPARAM wParam,
   LPARAM lParam
 )
 {
-	LRESULT result = 0;
 	switch(message)
 	{
 		// This msg is sent when window size changes
 		case WM_SIZE:
 		{
-			RECT clientRect;
-			// This gives the actual part where you can draw into - 
-			// Where as GetWindowRect gives total rect including scrollbar,buttons,...
-			GetClientRect(windowHandle, &clientRect);
-			int width = clientRect.right - clientRect.left;
-			int height = clientRect.bottom - clientRect.top;
-			// When window size changes we want to redraw our things based on the new window size
-			ResizeDIBSection(width, height);
-			OutputDebugStringA("WM_SIZE\n");
 			break;
 		}
 		// This message is posted when window is closed (X button, alt+f4,...)
 		case WM_CLOSE:
 		{
 			running = false;
-			OutputDebugStringA("WM_CLOSE\n");
+			//OutputDebugStringA("WM_CLOSE\n");
 			break;
 		}
 		case WM_DESTROY:
 		{
 			// Something destroyed the window handle the recreation of the window
-			OutputDebugStringA("Something destroyed the window recreate it maybe\n");
+			//OutputDebugStringA("Something destroyed the window recreate it maybe\n");
 			break;
 		}
 		case WM_ACTIVATEAPP:
 		{
-			OutputDebugStringA("WM_ACTIVATEAPP\n");
+			//OutputDebugStringA("WM_ACTIVATEAPP\n");
 			break;
 		}
 		case WM_PAINT:
 		{
 			PAINTSTRUCT paint;
 			HDC deviceContext = BeginPaint(windowHandle, &paint);
-			RECT rect = paint.rcPaint;
-			int x = rect.left;
-			int y = rect.top;
-			int width = rect.right - rect.left;
-			int height = rect.bottom - rect.top;
-			RECT clientRect;
-			GetClientRect(windowHandle, &clientRect);
-			updateWindow(deviceContext, &clientRect, x, y, width, height);
+			Win32_Dimension dimension = getWindowDimension(windowHandle);
+			updateWindow(deviceContext, dimension, globalBuffer,0 ,0, dimension.width, dimension.height);
 			EndPaint(windowHandle, &paint);
-
+			OutputDebugStringA("WM_PAINT");
 			break;
 		}
 		default:
 		{
-			OutputDebugStringA("Default\n");
+			//OutputDebugStringA("Default\n");
 			return DefWindowProc( windowHandle, message, wParam, lParam);
 		}
 	}
-	return result;
+	return 0;
 }
 
-int CALLBACK
+int 
 WinMain(
   HINSTANCE hInstance, // Can be fetched from GetModuleHandle() Function,
   HINSTANCE hPrevInstance,
@@ -165,7 +166,7 @@ WinMain(
   int       nShowCmd)
 {
 	WNDCLASSA windowClass = {};
-	windowClass.style = CS_OWNDC|CS_HREDRAW|CS_HREDRAW ; 
+	windowClass.style = CS_HREDRAW|CS_HREDRAW|CS_OWNDC ; 
 	windowClass.lpfnWndProc = MainCallBack; 
 	windowClass.hInstance = hInstance /*GetModuleHandle(0)*/; 
 	//windowClass.hIcon;  
@@ -193,6 +194,13 @@ WinMain(
 			MSG msg;
 			int xOffSet = 0;
 			int yOffSet = 0;
+			// CS_OWNDC gives one DC per window so we can get it once and use it forever
+			HDC deviceContext = GetDC(windowHandle);
+
+			Win32_Dimension dimension = getWindowDimension(windowHandle);
+			// When window size changes we want to redraw our things based on the new window size
+			ResizeDIBSection(&globalBuffer, dimension.width, dimension.height);
+
 			while(running)
 			{
 				//GetMessageA can give you -1 as well if error occurs so exit
@@ -209,16 +217,12 @@ WinMain(
 					DispatchMessageA(&msg);
 				}
 				
-				renderBitmap(xOffSet, yOffSet);
-				HDC deviceContext = GetDC(windowHandle);
-				RECT clientRect;
-				GetClientRect(windowHandle, &clientRect);
-				int windowWidth = clientRect.right - clientRect.left;
-				int windowHeight = clientRect.bottom - clientRect.top;
-				updateWindow(deviceContext, &clientRect, 0, 0, windowWidth, windowHeight);
-				ReleaseDC( windowHandle, deviceContext);
+				RenderWeirdGradient(globalBuffer, xOffSet, yOffSet);
+
+				Win32_Dimension dimension = getWindowDimension(windowHandle);
+				updateWindow(deviceContext, dimension, globalBuffer, 0, 0, dimension.width, dimension.height);
 				
-				// ++xOffSet;
+				++xOffSet;
 				++yOffSet;
 			}
 		}
