@@ -6,7 +6,7 @@
 #define internal static
 #define global_var static
 
-////// Review this sometime 
+////// Review this sometime for XBOX controller
 // Macros
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE* pState)
 #define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
@@ -64,7 +64,7 @@ struct Win32_Dimension
 global_var bool running;
 global_var Bitmap_buffer globalBuffer;
 
-internal void RenderWeirdGradient(Bitmap_buffer buffer, int xOffSet, int yOffSet)
+internal void RenderWeirdGradient(const Bitmap_buffer &buffer, int xOffSet, int yOffSet)
 {
 	uint8_t *row = (uint8_t *)(buffer.memory);
 	
@@ -131,7 +131,7 @@ ResizeDIBSection(Bitmap_buffer  *buffer, int width, int height)
 }
 
 internal void 
-updateWindow(HDC deviceContext, Win32_Dimension dimension, Bitmap_buffer buffer,
+updateWindow(HDC deviceContext, Win32_Dimension dimension, const Bitmap_buffer &buffer,
 			int x, int y, int width, int height)//  The last 4 params are not used
 {
 	
@@ -178,6 +178,29 @@ LRESULT CALLBACK MainCallBack(
 			//OutputDebugStringA("WM_ACTIVATEAPP\n");
 			break;
 		}
+
+		case WM_SYSKEYUP:
+		case WM_SYSKEYDOWN:
+		case WM_KEYDOWN:
+		case WM_KEYUP:
+		{
+			uint32_t VKCode = wParam;
+			bool wasDown = (lParam & (1 << 30)) != 0;
+			bool isDown = (lParam & (1 << 31)) == 0;
+			if (isDown != wasDown && VKCode == 'W')
+			{
+				if (isDown)
+				{
+					OutputDebugString("isDown\n");
+				}
+				if (wasDown)
+				{
+					OutputDebugString("wasDown\n");
+				}
+			}
+			break;
+		}
+
 		case WM_PAINT:
 		{
 			PAINTSTRUCT paint;
