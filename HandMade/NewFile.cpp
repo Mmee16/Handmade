@@ -1,8 +1,47 @@
 #include <windows.h>
 #include <stdint.h>
+#include <Xinput.h>
+
 
 #define internal static
 #define global_var static
+
+////// Review this sometime 
+// Macros
+#define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE* pState)
+#define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
+typedef X_INPUT_GET_STATE(x_input_get_state);
+typedef X_INPUT_SET_STATE(x_input_set_state);
+
+X_INPUT_GET_STATE(xInputGetStateStub)
+{
+	return 0;
+}
+X_INPUT_SET_STATE(xInputSetStateStub)
+{
+	return 0;
+}
+
+typedef DWORD WINAPI x_input_get_state(DWORD dwUserIndex, XINPUT_STATE* pState);
+typedef DWORD WINAPI x_input_set_state(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration);
+
+global_var x_input_get_state *XInputGetState_ = xInputGetStateStub;
+global_var x_input_set_state *XInputSetState_ = xInputSetStateStub;
+
+#define XInputGetState XInputGetState_
+#define XInputSetState XInputSetState_
+
+internal void Win32_LoadControllerFunctions()
+{
+	HMODULE library = LoadLibraryA("xinput1_3.dll");
+	if (library)
+	{
+		XInputGetState = (x_input_get_state *) GetProcAddress(library, "XInputGetState");
+		XInputSetState = (x_input_set_state *) GetProcAddress(library, "XInputSetState");
+	}
+}
+/////////
+
 
 struct Bitmap_buffer
 {
@@ -174,6 +213,7 @@ WinMain(
 	
 	if(RegisterClassA(&windowClass))
 	{
+		Win32_LoadControllerFunctions();
 		HWND windowHandle = 
 			CreateWindowExA(
 				0,
@@ -215,6 +255,49 @@ WinMain(
 					}
 					TranslateMessage(&msg);
 					DispatchMessageA(&msg);
+				}
+
+
+				// May want to move this to seperate file to handle all the controllers/Keyboard-mouse
+				DWORD dwResult;
+				DWORD controllerPrevState[4] = { 0 };
+				for (DWORD i = 0; i < XUSER_MAX_COUNT; i++)
+				{
+					XINPUT_STATE state;
+					ZeroMemory(&state, sizeof(XINPUT_STATE));
+					dwResult = XInputGetState(i, &state);
+					if (dwResult == ERROR_SUCCESS)
+					{
+						// This block might not be required
+						if (controllerPrevState[i] != state.dwPacketNumber)
+						{
+							// State of contoller 
+						}
+						controllerPrevState[i] = state.dwPacketNumber;
+						XINPUT_GAMEPAD *pad= &state.Gamepad;
+						bool upBut = pad->wButtons & XINPUT_GAMEPAD_DPAD_UP;
+						bool downBut = pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN;
+						bool leftBut = pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT;
+						bool rightBut = pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT;
+						bool startBut = pad->wButtons & XINPUT_GAMEPAD_START;
+						bool baakBut = pad->wButtons & XINPUT_GAMEPAD_BACK;
+						bool lThumbBut = pad->wButtons & XINPUT_GAMEPAD_LEFT_THUMB;
+						bool rThumbBut = pad->wButtons & XINPUT_GAMEPAD_RIGHT_THUMB;
+						bool lShoulderBut = pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER;
+						bool rShoulderBut = pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER;
+						bool aBut = pad->wButtons & XINPUT_GAMEPAD_A;
+						bool bBut = pad->wButtons & XINPUT_GAMEPAD_B;
+						bool xBut = pad->wButtons & XINPUT_GAMEPAD_X;
+						bool yBut = pad->wButtons & XINPUT_GAMEPAD_Y;
+
+						int16_t stickX = pad->sThumbLX;
+						int16_t stickY = pad->sThumbLY;
+					}
+					else
+					{
+						// May be you want to display something on the screen when 
+						// Controller is disconnected
+					}
 				}
 				
 				RenderWeirdGradient(globalBuffer, xOffSet, yOffSet);
